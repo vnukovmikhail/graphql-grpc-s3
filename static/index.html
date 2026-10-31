@@ -1,4 +1,4 @@
-<!DOCTYPE>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8">
@@ -6,16 +6,59 @@
     <title>Document</title>
   </head>
   <body>
-    <form action="/files" method="post" enctype="multipart/form-data">
-      <input type="file" name="file" id="file">
-      <input type="hidden" name="token" id="token">
-      <br>
-      <input type="submit" value="Go">
-    </form>
+    <div class="profile" onclick="signInOrOut()">
+      <span id="name">Anonymous</span>
+      <span id="subtext">(click to sign in)</span>
+    </div>
 
-    <button id="signin">Sign In</button>
+    <div class="main">
+      <input type="file" id="upload" multiple>
+      <div id="files">
+        
+      </div>
+    </div>
 
     <script type="module">
+      const box = document.getElementById('upload')
+      box.ondragenter = box.onfocus = box.onclick = () => {
+        box.classList.add('active');
+      };
+      box.ondragleave = box.onblur = box.ondrop = () => {
+        box.classList.remove('active');
+      };
+      box.onchange = async () => {
+        for (const file of box.files) {
+          const form = new FormData();
+          form.append('file', file);
+
+          const postRes = await fetch('/files', {
+            method: 'POST',
+            headers: { Authorization: auth.currentUser.accessToken },
+            body: form,
+          });
+
+          const fileData = await postRes.json();
+
+          renderFileView([fileData, ...allFiles]);
+        }
+      };
+
+      let allFiles;
+
+      const renderFileView = files => {
+        allFiles = files;
+
+        const parent = document.getElementById('files');
+        parent.innerHTML = ''
+
+        for (const file of files) {
+          parent.innerHTML += `
+          <a href="/files/${file.id}" class="name" target="_blank">${file.name}</a>
+          <span class="delete" onclick="deleteFile('${file.id}')">(delete)</span>
+          `;
+        }
+      }
+
       // Import the functions you need from the SDKs you need
       import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
       import { getAuth, signInAnonymously, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
@@ -37,18 +80,64 @@
       // Initialize Firebase
       const app = initializeApp(firebaseConfig);
       const auth = getAuth(app);
+      let prev = auth.currentUser;
 
-      auth.onAuthStateChanged(u => {
+      auth.onAuthStateChanged(async u => {
         if (u) {
-          document.querySelector('#token').value = u.accessToken;
+          console.log(u)
+
+          if (prev?.isAnonymous && !u.isAnonymous) {
+            await fetch('/login', {
+              method: 'POST',
+              body: JSON.stringify({
+                from: prev.accessToken,
+                to: u.accessToken,
+              }),
+              headers: {'Content-Type': 'application/json'},
+            });
+          }
+
+          if (prev?.uid !== u.uid) {
+            const filesRes = await fetch('/files', {
+              headers: {'Authorization': u.accessToken},
+            });
+
+            const files = await filesRes.json();
+            renderFileView(files);
+          }
         } else {
           signInAnonymously(auth);
         }
+        
+        document.getElementById("name").innerText = u.displayName || 'Anonymous'
+        document.getElementById("subtext").innerText = u.isAnonymous ? '(log in)' : '(log out)'
+        prev = u;
       });
 
       const provider = new GoogleAuthProvider();
+      window.signInOrOut = () => {
+        // if (!auth.currentUser) {
+        //   console.log("Auth is still initializing...")
+        //   return;
+        // }
 
-      document.querySelector('#signin').onclick = () => signInWithPopup(auth, provider);
+        if (auth.currentUser.isAnonymous) {
+          signInWithPopup(auth, provider);
+        } else {
+          auth.signOut();
+        }
+      };
+
+      window.deleteFile = async fileID => {
+        await fetch(`files/${fileID}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': auth.currentUser.accessToken }
+        });
+
+        renderFileView(allFiles.filter(f => f.id !== fileID));
+      }
+
+      window.auth = auth;
     </script>
   </body>
 </html>

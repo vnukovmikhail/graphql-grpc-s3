@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -21,7 +22,10 @@ import (
 	"google.golang.org/api/option"
 )
 
-const FILES = "./files/"
+const (
+	FILES = "./files/"
+	ITEMS = 20
+)
 
 type File struct {
 	ID          string    `json:"id" pg:",pk,type:uuid"`
@@ -88,6 +92,29 @@ func main() {
 
 	r.Use(static.Serve("/", static.LocalFile("static", false)))
 
+	r.GET("/files", func(ctx *gin.Context) {
+		p, err := strconv.Atoi(ctx.Query("page"))
+		if err != nil {
+			p = 0
+		} else if p < 0 {
+			p = 0
+		}
+
+		authToken, err := client.VerifyIDToken(context.Background(), ctx.GetHeader("Authorization"))
+		if err != nil {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		files := make([]File, 0)
+		if err = db.Model(&files).Where("user_id = ?", authToken.UID).Offset(p * ITEMS).Limit(ITEMS).Select(); err != nil {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		ctx.JSON(http.StatusOK, files)
+	})
+
 	r.GET("/files/:id", func(ctx *gin.Context) {
 		paramID := ctx.Param("id")
 
@@ -109,8 +136,41 @@ func main() {
 		ctx.File(filepath.Join(FILES, file.ID))
 	})
 
+	r.DELETE("/files/:id", func(ctx *gin.Context) {
+		paramID := ctx.Param("id")
+
+		if _, err := uuid.Parse(paramID); err != nil {
+			ctx.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		authToken, err := client.VerifyIDToken(context.Background(), ctx.GetHeader("Authorization"))
+		if err != nil {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		file := File{ID: paramID}
+
+		if err = db.Model(&file).WherePK().Select(); err != nil {
+			ctx.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		if file.UserID == authToken.UID {
+			if _, err := db.Model(&file).WherePK().Delete(); err != nil {
+				ctx.AbortWithStatus(http.StatusInternalServerError)
+				return
+			} else {
+				ctx.Status(http.StatusNoContent)
+			}
+		} else {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+		}
+	})
+
 	r.POST("/files", func(ctx *gin.Context) {
-		authToken, err := client.VerifyIDToken(context.Background(), ctx.Request.FormValue("token"))
+		authToken, err := client.VerifyIDToken(context.Background(), ctx.GetHeader("Authorization")) // LAST
 		if err != nil {
 			ctx.AbortWithStatus(http.StatusUnauthorized)
 			return
@@ -164,5 +224,41 @@ func main() {
 		ctx.JSON(http.StatusOK, f)
 	})
 
-	r.Run()
+	r.POST("/login", func(ctx *gin.Context) {
+		var body struct {
+			From string
+			To   string
+		}
+		if err := ctx.BindJSON(&body); err != nil {
+			ctx.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+
+		if body.From == "" {
+			ctx.Status(http.StatusNoContent)
+			return
+		}
+
+		fromAuthToken, err := client.VerifyIDToken(context.Background(), body.From)
+		if err != nil || fromAuthToken.Firebase.SignInProvider != "anonymous" {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		toAuthToken, err := client.VerifyIDToken(context.Background(), body.To)
+		if err != nil || toAuthToken.Firebase.SignInProvider == "anonymous" {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		_, err = db.Model(&File{}).Where("user_id = ?", fromAuthToken.UID).Set("user_id = ?", toAuthToken.UID).UpdateNotZero()
+		if err != nil {
+			ctx.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+
+		ctx.Status(http.StatusNoContent)
+	})
+
+	r.Run(":8080")
 }
