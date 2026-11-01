@@ -1,0 +1,120 @@
+const box = document.getElementById('upload')
+box.ondragenter = box.onfocus = box.onclick = () => {
+  box.classList.add('active');
+};
+box.ondragleave = box.onblur = box.ondrop = () => {
+  box.classList.remove('active');
+};
+box.onchange = async () => {
+  for (const file of box.files) {
+    const form = new FormData();
+    form.append('file', file);
+
+    const postRes = await fetch('/files', {
+      method: 'POST',
+      headers: { Authorization: auth.currentUser.accessToken },
+      body: form,
+    });
+
+    const fileData = await postRes.json();
+
+    renderFileView([fileData, ...allFiles]);
+  }
+};
+
+let allFiles;
+
+const renderFileView = files => {
+  allFiles = files;
+
+  const parent = document.getElementById('files');
+  parent.innerHTML = ''
+
+  for (const file of files) {
+    parent.innerHTML += `
+          <a href="${file.location}" class="name" target="_blank">${file.name}</a>
+          <span class="delete" onclick="deleteFile('${file.id}')">(delete)</span>
+          `;
+  }
+}
+
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
+import { getAuth, signInAnonymously, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyA6hsEIb-zs6XuIrEd_fb2lL38coW5C8Hs",
+  authDomain: "graphql-grpc-s3.firebaseapp.com",
+  projectId: "graphql-grpc-s3",
+  storageBucket: "graphql-grpc-s3.firebasestorage.app",
+  messagingSenderId: "436720686342",
+  appId: "1:436720686342:web:fa3b616a4695fe34f4ba87",
+  measurementId: "G-NSXQ4W6WW5"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+let prev = auth.currentUser;
+
+auth.onAuthStateChanged(async u => {
+  if (u) {
+    console.log(u)
+
+    if (prev?.isAnonymous && !u.isAnonymous) {
+      await fetch('/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          from: prev.accessToken,
+          to: u.accessToken,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (prev?.uid !== u.uid) {
+      const filesRes = await fetch('/files', {
+        headers: { 'Authorization': u.accessToken },
+      });
+
+      const files = await filesRes.json();
+      renderFileView(files);
+    }
+  } else {
+    signInAnonymously(auth);
+  }
+
+  document.getElementById("name").innerText = u.displayName || 'Anonymous'
+  document.getElementById("subtext").innerText = u.isAnonymous ? '(log in)' : '(log out)'
+  prev = u;
+});
+
+const provider = new GoogleAuthProvider();
+window.signInOrOut = () => {
+  // if (!auth.currentUser) {
+  //   console.log("Auth is still initializing...")
+  //   return;
+  // }
+
+  if (auth.currentUser.isAnonymous) {
+    signInWithPopup(auth, provider);
+  } else {
+    auth.signOut();
+  }
+};
+
+window.deleteFile = async fileID => {
+  await fetch(`files/${fileID}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': auth.currentUser.accessToken }
+  });
+
+  renderFileView(allFiles.filter(f => f.id !== fileID));
+}
+
+window.auth = auth;
+
