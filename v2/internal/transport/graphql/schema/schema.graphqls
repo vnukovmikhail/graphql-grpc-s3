@@ -1,0 +1,21 @@
+scalar Upload
+
+type File {
+  id: ID!
+  name: String!
+  size: Int!
+  url: String!
+}
+
+type AuthPayload {
+  token: String!
+}
+
+type Mutation {
+  register(email: String!, password: String!): AuthPayload!
+  uploadFile(file: Upload!): File!
+}
+
+type Query {
+  ping: String!
+}

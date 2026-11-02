@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "github.com/vnukovmikhail/graphql-grpc-s3/v2/pkg/pb/auth/v1;authv1";
+
+service AuthService {
+  rpc CheckList(CheckListRequest) returns (CheckListResponse);
+}
+
+message CheckListRequest {}
+message CheckListResponse { string message = 1; }
